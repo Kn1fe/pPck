@@ -1,0 +1,146 @@
+        public static void addFiles(string dir, string pck)
+        {
+            Merge(ref pck);
+            string[] files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
+            for (int a = 0; a < files.Length; ++a)
+            {
+                files[a] = files[a].Replace("D:\\t\\configs.pck.files\\", "").Replace("/", "\\");
+            }
+            BinaryReader br = new BinaryReader(new FileStream(pck, FileMode.Open, FileAccess.ReadWrite));
+            br.BaseStream.Seek(-8, SeekOrigin.End);
+            int entryCountOld = br.ReadInt32();
+            br.BaseStream.Seek(-272, SeekOrigin.End);
+            uint fileTableOffset = (uint)(br.ReadUInt32() ^ KEY_1);
+            int entryCount = entryCountOld + files.Length;
+            fileTableEntry[] table = new fileTableEntry[entryCountOld];
+            List<fileTableEntry> fileTable = new List<fileTableEntry>();
+            br.BaseStream.Seek(fileTableOffset, SeekOrigin.Begin);
+            for (int a = 0; a < entryCountOld; ++a)
+            {
+                int entrySize = br.ReadInt32() ^ KEY_1;
+                entrySize = br.ReadInt32() ^ KEY_2;
+                byte[] buffer = new byte[entrySize];
+                buffer = br.ReadBytes(entrySize);
+                if (entrySize < ENTRY_SIZE)
+                {
+                    table[a] = readTableEntry(buffer, true);
+                }
+                else
+                {
+                    table[a] = readTableEntry(buffer, false);
+                }
+            }
+            br.BaseStream.Seek(12, SeekOrigin.Begin);
+            FileStream fs = new FileStream(pck + ".tmp", FileMode.Create, FileAccess.ReadWrite);
+            BinaryWriter bw = new BinaryWriter(fs);
+            bw.Write(FSIG_1);
+            bw.Write(0);
+            bw.Write(FSIG_2);
+            for (int a = 0; a < entryCountOld; ++a)
+            {
+                bool Isset = false;
+                for (int b = 0; b < files.Length; ++b)
+                {
+                    if (table[a].filePath == files[b])
+                    {
+                        Isset = true;
+                        br.BaseStream.Seek(table[a].fileDataCompressedSize, SeekOrigin.Current);
+                        break;
+                    }
+                }
+                if (!Isset)
+                {
+                    table[a].fileDataOffset = (uint)bw.BaseStream.Position;
+                    bw.Write(br.ReadBytes(table[a].fileDataCompressedSize));
+                    fileTable.Add(table[a]);
+                }
+            }
+            for (int a = 0; a < files.Length; ++a)
+            {
+                fileTableEntry fte = new fileTableEntry();
+                FileStream file = new FileStream("D:\\t\\configs.pck.files\\" + files[a], FileMode.Open, FileAccess.Read);
+                fte.filePath = files[a];
+                fte.fileDataOffset = (uint)bw.BaseStream.Position;
+                fte.fileDataDecompressedSize = (int)file.Length;
+                MemoryStream ms = new MemoryStream();
+                CompressStream(file, ms, (int)file.Length);
+                byte[] buffer = ms.ToArray();
+                fte.fileDataCompressedSize = buffer.Length;
+                bw.Write(buffer);
+                file.Close();
+                fileTable.Add(fte);
+            }
+            fileTableOffset = (uint)bw.BaseStream.Position;
+            for (int a = 0; a < fileTable.Count; ++a)
+            {
+                byte[] buffer = writeTableEntry(fileTable[a]);
+                bw.Write(buffer.Length ^ KEY_1);
+                bw.Write(buffer.Length ^ KEY_2);
+                bw.Write(buffer);
+
+            }
+            byte[] nuller = new byte[272];
+            bw.Write(nuller);
+            bw.BaseStream.Seek(4, SeekOrigin.Begin);
+            bw.Write((int)bw.BaseStream.Length);
+            bw.BaseStream.Seek(-272, SeekOrigin.End);
+            bw.Write(fileTableOffset ^ KEY_1);
+            bw.BaseStream.Seek(-8, SeekOrigin.End);
+            bw.Write(fileTable.Count);
+            bw.Close();
+            br.Close();
+            File.Delete(pck);
+            File.Move(pck + ".tmp", pck);
+            Split(pck);
+        }
+
+        public static void pack(string dir)
+        {
+            string pck = dir.Replace(".files\\", "");
+            string[] files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
+            for (int a = 0; a < files.Length; ++a)
+            {
+                files[a] = files[a].Replace(dir, "").Replace("/", "\\");
+            }
+            uint fileTableOffset = 0;
+            List<fileTableEntry> fileTable = new List<fileTableEntry>();
+            FileStream fs = new FileStream(pck, FileMode.Create, FileAccess.ReadWrite);
+            BinaryWriter bw = new BinaryWriter(fs);
+            bw.Write(FSIG_1);
+            bw.Write(0);
+            bw.Write(FSIG_2);
+            for (int a = 0; a < files.Length; ++a)
+            {
+                fileTableEntry fte = new fileTableEntry();
+                FileStream file = new FileStream(dir + "\\" + files[a], FileMode.Open, FileAccess.Read);
+                fte.filePath = files[a];
+                fte.fileDataOffset = (uint)bw.BaseStream.Position;
+                fte.fileDataDecompressedSize = (int)file.Length;
+                MemoryStream ms = new MemoryStream();
+                CompressStream(file, ms, (int)file.Length);
+                byte[] buffer = ms.ToArray();
+                fte.fileDataCompressedSize = buffer.Length;
+                bw.Write(buffer);
+                file.Close();
+                fileTable.Add(fte);
+            }
+            fileTableOffset = (uint)bw.BaseStream.Position;
+            for (int a = 0; a < fileTable.Count; ++a)
+            {
+                byte[] buffer = writeTableEntry(fileTable[a]);
+                bw.Write(buffer.Length ^ KEY_1);
+                bw.Write(buffer.Length ^ KEY_2);
+                bw.Write(buffer);
+
+            }
+            byte[] nuller = new byte[272];
+            bw.Write(nuller);
+            bw.BaseStream.Seek(4, SeekOrigin.Begin);
+            bw.Write((int)bw.BaseStream.Length);
+            bw.BaseStream.Seek(-272, SeekOrigin.End);
+            bw.Write(fileTableOffset ^ KEY_1);
+            bw.BaseStream.Seek(-8, SeekOrigin.End);
+            bw.Write(fileTable.Count);
+            bw.Close();
+            Split(pck);
+        }
